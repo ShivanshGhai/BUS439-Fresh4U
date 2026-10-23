@@ -1,9 +1,11 @@
 """
 Runs streamlit_app.py from top to bottom with a stand-in for the streamlit module,
-so every widget takes its default value. Catches errors in the app code itself
-(it does not test layout). Uses the bundled synthetic demo data.
+so every widget takes its default value. Catches errors in the app code itself and
+checks every chart compiles to a valid Vega-Lite spec (it does not test layout).
+Uses the bundled synthetic demo data. Needs altair (installed with streamlit).
 """
 import os
+import re
 import runpy
 import sys
 import types
@@ -11,6 +13,17 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+
+
+class StopApp(Exception):
+    pass
+
+
+class _Any:
+    """Stands in for st.column_config and similar namespaces."""
+
+    def __getattr__(self, name):
+        return lambda *a, **k: dict(kind=name, args=a, **k)
 
 
 class _Ctx:
@@ -24,12 +37,9 @@ class _Ctx:
         return getattr(FakeSt, name)
 
 
-class StopApp(Exception):
-    pass
-
-
 class FakeSt:
     calls = []
+    column_config = _Any()
 
     @staticmethod
     def _rec(name, *a, **k):
@@ -53,6 +63,10 @@ class FakeSt:
         return options[index]
 
     @staticmethod
+    def multiselect(label, options, default=None, **k):
+        return list(default or [])
+
+    @staticmethod
     def slider(label, lo, hi, value=None, **k):
         return value if value is not None else lo
 
@@ -71,7 +85,7 @@ class FakeSt:
         return [_Ctx() for _ in names]
 
     @staticmethod
-    def columns(n):
+    def columns(n, **k):
         return [_Ctx() for _ in range(n if isinstance(n, int) else len(n))]
 
     @staticmethod
@@ -83,30 +97,20 @@ class FakeSt:
         raise StopApp()
 
     @staticmethod
-    def metric(label, value, *a, **k):
-        assert "nan" not in str(value).lower(), (label, value)
-        FakeSt._rec("metric", label, value)
-
-    @staticmethod
     def dataframe(df, **k):
         assert len(df.columns) > 0
+        for c in (k.get("column_config") or {}):
+            assert c in df.columns, (c, list(df.columns))
         FakeSt._rec("dataframe", len(df))
 
     @staticmethod
-    def line_chart(df, x=None, y=None, color=None, **k):
-        for c in (x, y, color):
-            assert c is None or c in df.columns, (c, list(df.columns))
-        FakeSt._rec("chart", len(df))
-
-    bar_chart = line_chart
+    def altair_chart(chart, **k):
+        spec = chart.to_dict()  # raises if the chart is not valid Vega-Lite
+        FakeSt._rec("chart", spec)
 
     @staticmethod
     def markdown(text, *a, **k):
-        assert "nan" not in text.lower(), text
         FakeSt._rec("markdown", text)
-
-    def __getattr__(self, name):
-        return lambda *a, **k: FakeSt._rec(name, *a, **k)
 
 
 def fake_module():
@@ -115,14 +119,20 @@ def fake_module():
         if not name.startswith("__"):
             setattr(m, name, getattr(FakeSt, name))
     for name in ["set_page_config", "title", "caption", "info", "warning", "error", "subheader", "code",
-                 "download_button", "write"]:
+                 "download_button", "write", "image", "divider"]:
         setattr(m, name, lambda *a, _n=name, **k: FakeSt._rec(_n, *a, **k))
+    m.sidebar = _Ctx()
     return m
+
+
+def _text(html):
+    return re.sub(r"<[^>]+>", " ", html)
 
 
 class TestAppSmoke(unittest.TestCase):
     def test_app_runs_on_demo_data(self):
         sys.modules["streamlit"] = fake_module()
+        sys.modules.pop("app_ui", None)
         FakeSt.calls = []
         try:
             runpy.run_path(os.path.join(ROOT, "streamlit_app.py"), run_name="__main__")
@@ -130,12 +140,18 @@ class TestAppSmoke(unittest.TestCase):
             self.fail("app stopped early on demo data")
         finally:
             del sys.modules["streamlit"]
-        metrics = {a[0]: a[1] for n, a, k in FakeSt.calls if n == "metric"}
-        self.assertEqual(metrics["Files loaded"], 3)
-        self.assertEqual(metrics["Files quarantined"], 1)
-        self.assertEqual(metrics["Totals that failed"], 0)
-        self.assertGreater(int(metrics["People needed"]), 0)
-        self.assertGreaterEqual(sum(1 for n, *_ in FakeSt.calls if n == "chart"), 3)
+            sys.modules.pop("app_ui", None)
+        page = " ".join(_text(a[0]) for n, a, k in FakeSt.calls if n == "markdown" and "<style>" not in a[0])
+        page = re.sub(r"\s+", " ", page)
+        self.assertIsNone(re.search(r"\bnan\b", page, flags=re.I), "a number printed as nan")
+        self.assertIn("Built by GLW BC", page)
+        self.assertIn("Priva totals reconciled 117 / 117", page)
+        self.assertIn("Files held back 1", page)
+        people = re.search(r"People needed (\d+)", page)
+        self.assertIsNotNone(people)
+        self.assertGreater(int(people.group(1)), 0)
+        self.assertGreaterEqual(page.count("What this means"), 8)
+        self.assertGreaterEqual(sum(1 for n, *_ in FakeSt.calls if n == "chart"), 6)
 
 
 if __name__ == "__main__":
