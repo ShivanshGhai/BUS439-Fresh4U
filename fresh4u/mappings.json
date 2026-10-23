@@ -1,0 +1,46 @@
+{
+  "_about": "How Priva report headers map to our column names. To support a new report or a renamed field, edit this file, not the code. Header text is matched case-insensitively with spaces trimmed.",
+
+  "performance": {
+    "description": "Priva Operational Report, Performance template (labour registrations per activity / location / employee)",
+    "dimensions": {
+      "date": ["Date", "Day"],
+      "activity": ["Activity"],
+      "location": ["Location", "Row", "Path"],
+      "greenhouse": ["Greenhouse", "House"],
+      "site": ["Site"],
+      "employee_group": ["Employee group"],
+      "employee_id": ["Employee (short)", "Employee", "Employee number"],
+      "start_time": ["Start time"],
+      "end_time": ["End time"],
+      "hour": ["Hour"]
+    },
+    "measures": {
+      "hours": ["Registered hours"],
+      "result": ["Result"],
+      "area_m2": ["Area"],
+      "perf_per_hour_priva": ["Performance / hour", "Performance/hour"],
+      "locations_count": ["Number of locations"],
+      "area_per_hour_priva": ["Area / hour", "Area/hour"]
+    },
+    "required": ["date", "activity", "employee_id", "hours"],
+    "additive": ["hours", "result", "area_m2"]
+  },
+
+  "hours": {
+    "description": "Priva Operational Report, Hours template (present / worked / paid hours per employee per day). Mapping is a first guess until we see a real export.",
+    "dimensions": {
+      "date": ["Date", "Day"],
+      "employee_group": ["Employee group"],
+      "employee_id": ["Employee (short)", "Employee", "Employee number"]
+    },
+    "measures": {
+      "present_hours": ["Present hours", "Hours present"],
+      "worked_hours": ["Worked hours", "Hours worked", "Registered hours"],
+      "paid_hours": ["Paid hours", "Hours to be paid"],
+      "break_hours": ["Break hours", "Breaks"]
+    },
+    "required": ["date", "employee_id", "present_hours"],
+    "additive": ["present_hours", "worked_hours", "paid_hours", "break_hours"]
+  }
+}

@@ -1,0 +1,14 @@
+# Client data never goes in this repo
+data/
+outputs/
+*.xlsx
+*.xls
+*.csv
+!demo_data/*.xlsx
+
+# Python / OS
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+.streamlit/secrets.toml
