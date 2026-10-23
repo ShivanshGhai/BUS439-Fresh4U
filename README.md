@@ -1,6 +1,6 @@
 # Fresh4U labour planner
 
-A prototype for **Fresh4U** (BUS 439, Simon Fraser University, Fall 2026 · Team BCGLW).
+A prototype for **Fresh4U** (BUS 439, Simon Fraser University, Fall 2026 · team GLW BC).
 It turns Priva Performance exports into a weekly labour plan, a supervisor's crew-strengths view
 and a weekly list of registrations to check — and refuses any data it cannot verify.
 
@@ -38,6 +38,9 @@ python3 -m unittest discover -s tests -v
 
 ```
 streamlit_app.py        the app (thin UI over fresh4u/)
+app_ui.py               brand theme, page styling and charts for the app
+.streamlit/config.toml  Fresh4U Group colours for Streamlit
+assets/                 The Fresh4U Group logo
 run.py                  pipeline command
 fresh4u/
   priva_reader.py       header-driven reader + reconciliation
@@ -47,6 +50,7 @@ fresh4u/
   planner.py            weekly planner
   coaching.py           crew strengths bands
   app_data.py           runs the pipeline for the app
+  insights.py           plain-language interpretation for every chart, written from the live numbers
 scripts/make_demo_data.py   synthetic Priva-style exports
 demo_data/              the synthetic exports (one hand-edited on purpose)
 tests/                  regression, robustness, planner/coaching, app smoke test

@@ -1,6 +1,11 @@
+# Fresh4U Group brand theme (colours from the logo in assets/).
 [theme]
 base = "light"
-primaryColor = "#2f6b3a"
+primaryColor = "#0A7D2C"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7F4"
+textColor = "#2E3138"
+font = "sans serif"
 
-[server]
-maxUploadSize = 50
+[client]
+toolbarMode = "minimal"
