@@ -207,8 +207,10 @@ def rows_takeaway(pace: pd.DataFrame) -> str:
     full = [t for t, v in passes.items() if v >= 0.9]
     if len(full) == len(avg):
         return (f"{'The selected task goes' if len(avg) == 1 else 'Every selected task goes'} through roughly the "
-                f"**whole greenhouse ({planner.GREENHOUSE_ROWS} rows) every week** ({n(avg.min())} to "
-                f"{n(avg.max())} rows on average). The row count is predictable, so the plan mainly depends on pace.")
+                f"**whole greenhouse ({planner.GREENHOUSE_ROWS} rows) every week**"
+                + (f" (about {n(avg.mean())} rows on average)" if n(avg.min()) == n(avg.max())
+                   else f" ({n(avg.min())} to {n(avg.max())} rows on average)")
+                + ". The row count is predictable, so the plan mainly depends on pace.")
     s = f"**{avg.index[0]}** covers the most ground, about {n(avg.iloc[0])} rows a week."
     if full:
         s += (f" {', '.join(full)} {'goes' if len(full) == 1 else 'go'} through roughly the **whole greenhouse "

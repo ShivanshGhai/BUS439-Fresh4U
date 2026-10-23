@@ -298,6 +298,13 @@ def _weeks(df: pd.DataFrame, col: str = "week_start") -> pd.DataFrame:
     return df
 
 
+def _week_x(d: pd.DataFrame) -> alt.X:
+    """One label per week, on the Monday each week starts (a time axis would label Sundays)."""
+    labels = [pd.Timestamp(w).strftime("%b %d") for w in sorted(d["week_start"].unique())]
+    return alt.X("week:O", title=None, sort=labels, axis=alt.Axis(labelAngle=0, labelPadding=8),
+                 scale=alt.Scale(paddingOuter=0.25))
+
+
 def backtest_chart(pva: pd.DataFrame):
     d = _weeks(pva)
     d["miss"] = d["variance_pct"].abs().round(1)
@@ -305,15 +312,21 @@ def backtest_chart(pva: pd.DataFrame):
                   var_name="series", value_name="hours")
     long["series"] = long["series"].map({"actual_hours": "Actual hours", "planned_hours": "Planned by the method"})
     long["hours"] = long["hours"].astype(float).round(0)
-    x = alt.X("week_start:T", title=None, axis=alt.Axis(format="%b %d", tickCount="week", labelAngle=0))
+    x = _week_x(long)
     color = alt.Color("series:N", scale=alt.Scale(domain=["Actual hours", "Planned by the method"],
                                                    range=[SLATE, GREEN_DARK]))
     dash = alt.StrokeDash("series:N", scale=alt.Scale(domain=["Actual hours", "Planned by the method"],
-                                                       range=[[1, 0], [6, 4]]), legend=None)
+                                                       range=[[1, 0], [6, 4]]))
+    # Keep about ±10% of context so a 1-2% miss looks like the small miss it is.
+    lo, hi = long["hours"].min(), long["hours"].max()
+    mid = (lo + hi) / 2
+    span = max(hi - lo, 0.2 * mid)
+    domain = [max(0, mid - span / 2 - 0.05 * span), mid + span / 2 + 0.05 * span]
     tip = [alt.Tooltip("week_start:T", title="Week of", format="%b %d, %Y"),
            alt.Tooltip("series:N", title="Series"), alt.Tooltip("hours:Q", title="Hours", format=",.0f"),
            alt.Tooltip("miss:Q", title="Plan missed by (%)")]
-    base = alt.Chart(long).encode(x=x, y=alt.Y("hours:Q", title="Hours", scale=alt.Scale(zero=False)), color=color)
+    base = alt.Chart(long).encode(x=x, y=alt.Y("hours:Q", title="Hours", scale=alt.Scale(domain=domain, nice=False)),
+                                  color=color)
     lines = base.mark_line(strokeWidth=2.5).encode(strokeDash=dash)
     pts = base.mark_point(filled=True, size=70, opacity=1).encode(tooltip=tip)
     hit = base.mark_point(size=500, opacity=0).encode(tooltip=tip)
@@ -335,7 +348,7 @@ def strengths_chart(view: pd.DataFrame):
               if hasattr(alt, "YOffset") else {})  # Altair 5+; older versions just overlap the dots
     dots = alt.Chart(d).mark_circle(size=150, opacity=0.9, stroke="#fff", strokeWidth=1.5).encode(
         x=alt.X("speed:Q", title="Speed (100 = that week's typical pace; higher is faster)",
-                scale=alt.Scale(zero=False, padding=12)),
+                scale=alt.Scale(zero=False, padding=12), axis=alt.Axis(tickCount=8)),
         y=alt.Y("band:N", title=None, sort=present),
         **jitter,
         color=alt.Color("band:N", scale=alt.Scale(domain=present, range=[BAND_COLORS[b] for b in present]),
@@ -352,11 +365,13 @@ def hours_chart(weekly: pd.DataFrame, colors: dict):
     order = sorted(d["week_start"].unique())
     labels = [pd.Timestamp(w).strftime("%b %d") for w in order]
     present = d["activity_name"].unique()
+    rank = {t: i for i, t in enumerate(colors)}
+    d["rank"] = d["activity_name"].map(rank)
     return alt.Chart(d).mark_bar(stroke="#fff", strokeWidth=1.5).encode(
         x=alt.X("week:O", title=None, sort=labels, axis=alt.Axis(labelAngle=0)),
         y=alt.Y("sum(hours):Q", title="Hours", stack="zero"),
         color=alt.Color("activity_name:N", scale=_scale(colors, present)),
-        order=alt.Order("activity_name:N"),
+        order=alt.Order("rank:Q", sort="ascending"),
         tooltip=[alt.Tooltip("week:O", title="Week of"), alt.Tooltip("activity_name:N", title="Task"),
                  alt.Tooltip("sum(hours):Q", title="Hours", format=",.0f")])
 
@@ -364,7 +379,7 @@ def hours_chart(weekly: pd.DataFrame, colors: dict):
 def _task_lines(d: pd.DataFrame, y: str, title: str, colors: dict, fmt: str):
     d = _weeks(d)
     d[y] = d[y].astype(float)
-    x = alt.X("week_start:T", title=None, axis=alt.Axis(format="%b %d", tickCount="week", labelAngle=0))
+    x = _week_x(d)
     base = alt.Chart(d).encode(x=x, y=alt.Y(f"{y}:Q", title=title),
                                color=alt.Color("activity_name:N", scale=_scale(colors, d["activity_name"].unique())))
     tip = [alt.Tooltip("week_start:T", title="Week of", format="%b %d, %Y"),
@@ -377,7 +392,7 @@ def rows_chart(pace: pd.DataFrame, colors: dict, greenhouse_rows: int):
     lines = _task_lines(pace, "rows_done", "Rows completed", colors, ",.0f")
     rule = alt.Chart(pd.DataFrame({"y": [greenhouse_rows]}))
     ref = rule.mark_rule(color=SLATE, strokeDash=[5, 4]).encode(y="y:Q")
-    lab = rule.mark_text(align="left", dx=4, dy=-7, color=MUTED, fontSize=11).encode(
+    lab = rule.mark_text(align="left", dx=6, dy=12, color=MUTED, fontSize=11).encode(
         y="y:Q", x=alt.value(0), text=alt.value(f"Whole greenhouse ({greenhouse_rows} rows)"))
     return lines + ref + lab
 
