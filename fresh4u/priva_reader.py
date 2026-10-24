@@ -18,6 +18,7 @@ plain-language reason, so the caller can quarantine the file instead of guessing
 """
 from __future__ import annotations
 
+import datetime as _dt
 import hashlib
 import json
 import os
@@ -60,6 +61,49 @@ def load_mappings(path: str | None = None) -> dict:
     with open(path or os.path.join(HERE, "mappings.json"), encoding="utf-8") as fh:
         m = json.load(fh)
     return {k: v for k, v in m.items() if not k.startswith("_")}
+
+
+def not_used_reports(path: str | None = None) -> dict:
+    """Report titles we recognise but do not use (title -> reason)."""
+    with open(path or os.path.join(HERE, "mappings.json"), encoding="utf-8") as fh:
+        m = json.load(fh).get("_not_used", {})
+    return {k: v for k, v in m.items() if not k.startswith("_")}
+
+
+def report_title(path: str) -> str | None:
+    """The report's own title: the first text in the first row (e.g. 'Hours', 'Production (tactical)')."""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        for r in wb.worksheets[0].iter_rows(min_row=1, max_row=1, values_only=True):
+            return next((str(c).strip() for c in r if c not in (None, "")), None)
+    finally:
+        wb.close()
+    return None
+
+
+def protect_names(df: pd.DataFrame) -> tuple[pd.DataFrame, list]:
+    """Never keep names. Use the employee number Priva gives; where none is given, a stable pseudonym.
+    Returns the table without names and plain notes on what was done."""
+    notes = []
+    if "employee_name" not in df:
+        return df, notes
+    df = df.copy()
+    name = df["employee_name"].astype("string").str.strip()
+    ident = df["employee_id"] if "employee_id" in df else pd.Series(pd.NA, index=df.index, dtype="object")
+    if "employee_number" in df:
+        num = pd.to_numeric(df["employee_number"], errors="coerce")
+        ident = ident.where(ident.notna(), num.map(lambda v: str(int(v)) if pd.notna(v) else pd.NA))
+    ident = ident.map(lambda v: pd.NA if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() in ("", "nan", "<NA>")
+                      else str(v).split(".")[0].strip())
+    missing = ident.isna() & name.notna()
+    if missing.any():
+        ident[missing] = name[missing].map(lambda n: "P-" + hashlib.sha1(n.encode()).hexdigest()[:8])
+        notes.append(f"{int(missing.sum())} records had a name but no employee number; a stable code (P-...) was used.")
+    df["employee_id"] = ident
+    shared = df.loc[name.notna()].groupby(name[name.notna()])["employee_id"].nunique()
+    if (shared > 1).any():
+        notes.append(f"{int((shared > 1).sum())} names belong to more than one employee number; records keep their own number.")
+    return df.drop(columns=["employee_name"]), notes
 
 
 def file_sha256(path: str) -> str:
@@ -240,16 +284,29 @@ def read_report(path: str, mappings: dict | None = None) -> Report:
     level_of = {c: k for k, c in enumerate(label_cols)}
     leaf_level = len(label_cols) - 1
 
+    text_measures = set(mapping.get("text", []))
+    time_measures = set(mapping.get("times", []))
+
     def values(r):
         out = {}
         for i in meas_cols:
             v = r[i]
             if v is None or v == "":
                 continue
-            try:
-                v = float(v)
-            except (TypeError, ValueError):
-                raise ReportError(f"Non-numeric value {v!r} in measure column '{hdr[i]}'.")
+            if meas_of[i] in text_measures:
+                v = str(v).strip()
+            elif isinstance(v, _dt.timedelta):          # clock times / durations -> hours
+                v = v.total_seconds() / 3600
+            elif isinstance(v, _dt.time):
+                v = v.hour + v.minute / 60 + v.second / 3600
+            elif meas_of[i] in time_measures and isinstance(v, str) and re.match(r"^\d{1,2}:\d{2}(:\d{2})?$", v.strip()):
+                hh, mm, *ss = (int(x) for x in v.strip().split(":"))
+                v = hh + mm / 60 + (ss[0] if ss else 0) / 3600
+            else:
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    raise ReportError(f"Non-numeric value {v!r} in measure column '{hdr[i]}'.")
             out.setdefault(col_value[i], {})[meas_of[i]] = v
         return out
 
@@ -310,6 +367,8 @@ def read_report(path: str, mappings: dict | None = None) -> Report:
     else:
         rc["diff"], rc["match"] = [], []
 
+    df, name_notes = protect_names(df)
+    notes += name_notes
     exported = next((str(r[0]) for r in rows[-3:] if r[0] and re.match(r"\d{4}-\d{2}-\d{2} \d", str(r[0]))), None)
     return Report(file=fname, sha256=sha, report_type=report_type, title=title,
                   period_start=pm.group(1) if pm else None, period_end=pm.group(2) if pm else None,

@@ -62,7 +62,23 @@ checks passed, rows replaced). Every total check is in `data/reconciliation.csv`
    plus which fields are required and which measures add up.
 3. Run again. The file loads with no code change.
 
-The `hours` entry is a first guess at Priva's Hours report and will be confirmed on the first real export.
+## Reports it reads (Oct 2026)
+
+| Report | Type | One record = | Checked against |
+|---|---|---|---|
+| R&D Analytics / Performance (with dates) | `performance` | one registration | daily (or per-activity) subtotals and the grand total |
+| Production | `production` | activity group × activity × location for the period | group subtotals and the grand total |
+| Hours | `hours` | employee × weekday for the period (no names: the employee number is kept) | employee-group subtotals and the grand total |
+| Production (tactical) | `yield` | crop label × ISO week (kg, kg/m²) | each year's total row and the grand total |
+| Management Report | `mgmt_report` | crop block × activity × weekday for one week | each row's grand total, and each block = sum of its activities |
+
+Reports with no date column (Production, Hours, yield) are stored by period: a new file whose period
+overlaps a stored one replaces it. Clock times (e.g. 06:14) are read as hours; words such as "Present"
+are kept as text. Any `employee_name` column is replaced by the employee number Priva gives (or a stable
+`P-...` code where there is none) before anything is written.
+
+Recognised but not used yet (listed in the app with the reason, not counted as failures): see `_not_used`
+in `mappings.json`.
 
 ## Tests
 
@@ -77,7 +93,7 @@ dates outside the period and unknown reports.
 
 ## Assumptions to confirm with Fresh4U
 
-- Rows 1001–1280 are House 1 and 2001–2280 House 2 (`house_inferred`).
+- Rows 1001–1280 are House 1, 2001–2280 House 2, 3001–3560 House 3, 4001–4560 House 4.
 - One full row is 144.5 m² (how Priva records it); "minutes per row" uses this.
 - "Review" means a registration took 3× or more the task's median minutes per row.
-- Registered hours may include breaks; the Hours report should settle this.
+- Settled: breaks are their own unpaid activity ("Break (All)"); paid ≈ registered − breaks.

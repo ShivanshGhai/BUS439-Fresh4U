@@ -81,6 +81,18 @@ class FakeSt:
         return None
 
     @staticmethod
+    def text_input(label, value="", **k):
+        return value
+
+    @staticmethod
+    def data_editor(df, **k):
+        assert len(df.columns) > 0
+        for c in (k.get("column_config") or {}):
+            assert c in df.columns, (c, list(df.columns))
+        FakeSt._rec("data_editor", len(df))
+        return df
+
+    @staticmethod
     def tabs(names):
         return [_Ctx() for _ in names]
 
@@ -90,6 +102,10 @@ class FakeSt:
 
     @staticmethod
     def expander(*a, **k):
+        return _Ctx()
+
+    @staticmethod
+    def container(*a, **k):
         return _Ctx()
 
     @staticmethod
@@ -145,7 +161,13 @@ class TestAppSmoke(unittest.TestCase):
         page = re.sub(r"\s+", " ", page)
         self.assertIsNone(re.search(r"\bnan\b", page, flags=re.I), "a number printed as nan")
         self.assertIn("Built by GLW BC", page)
-        self.assertIn("Priva totals reconciled 117 / 117", page)
+        m = re.search(r"Priva totals reconciled (\d+) / (\d+)", page)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1), m.group(2), "every total in the loaded demo files should reconcile")
+        self.assertGreater(int(m.group(1)), 200)
+        for words in ["Busiest week", "Contractor person-weeks", "Present but untagged", "Targets",
+                      "Recognised, not used"]:
+            self.assertIn(words, page)
         self.assertIn("Files held back 1", page)
         people = re.search(r"People needed (\d+)", page)
         self.assertIsNotNone(people)

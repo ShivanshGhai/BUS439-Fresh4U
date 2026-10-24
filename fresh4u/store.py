@@ -60,25 +60,33 @@ class Store:
         p = self.hist_path(report_type)
         if not os.path.exists(p):
             return pd.DataFrame()
-        return pd.read_csv(p, dtype={"employee_id": str, "date": str}, low_memory=False)
+        return pd.read_csv(p, dtype={"employee_id": str, "date": str, "period_start": str, "period_end": str},
+                           low_memory=False)
 
     def upsert(self, report, extra_cols: dict) -> tuple[int, list]:
         new = report.records.copy()
         for k, v in extra_cols.items():
             new[k] = v
-        new["date"] = new["date"].astype(str)
+        dated = "date" in new
+        if dated:
+            new["date"] = new["date"].astype(str)
         old = self.history(report.report_type)
         replaced, from_files = 0, []
         if not old.empty:
-            if report.period_start and report.period_end:
+            if dated and "date" in old and report.period_start and report.period_end:
                 mask = (old["date"] >= report.period_start) & (old["date"] <= report.period_end)
-            else:
+            elif dated and "date" in old:
                 mask = old["date"].isin(set(new["date"]))
+            else:
+                # reports without a date column (Production, Hours, yield...): a file covering an
+                # overlapping period replaces the stored one
+                mask = (old["period_start"] <= str(report.period_end)) & (old["period_end"] >= str(report.period_start))
             replaced = int(mask.sum())
             from_files = sorted(old.loc[mask, "source_file"].dropna().unique().tolist())
             old = old[~mask]
         out = pd.concat([old, new], ignore_index=True) if not old.empty else new
-        out = out.sort_values(["date", "source_file", "excel_row"], kind="stable")
+        sort = [c for c in ("date", "period_start", "source_file", "excel_row") if c in out]
+        out = out.sort_values(sort, kind="stable")
         tmp = self.hist_path(report.report_type) + ".tmp"
         out.to_csv(tmp, index=False)
         os.replace(tmp, self.hist_path(report.report_type))   # never leaves a half-written history
@@ -98,6 +106,13 @@ class Store:
                               checks=len(rc), checks_failed=int((~rc["match"]).sum()) if len(rc) else 0,
                               status="loaded", replaced_rows=replaced, replaced_from=";".join(from_files),
                               message=message))
+
+    def record_not_used(self, file: str, sha: str, title: str, reason: str):
+        self._append_log(dict(file=file, sha256=sha, report_type=title, status="not used", message=reason))
+
+    def already_seen(self, sha: str) -> bool:
+        lg = self.log()
+        return not lg[(lg["sha256"] == sha) & (lg["status"] == "not used")].empty
 
     # ---- quarantine ----------------------------------------------------------
     def quarantine(self, file: str, sha: str, reason: str, preview: pd.DataFrame | None = None,

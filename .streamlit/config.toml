@@ -1,14 +1,33 @@
-# Fresh4U Group brand theme (colours from the logo in assets/).
+# Fresh4U Labour Planner theme: the season wall planner (see PRODUCT.md and DESIGN.md).
+# Logo colours stay: green #00972D, tomato #F91C1C (red only for failed checks).
 [theme]
 base = "light"
 primaryColor = "#0A7D2C"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F7F4"
-textColor = "#2E3138"
-font = "sans serif"
+secondaryBackgroundColor = "#F3F5F2"
+textColor = "#16191D"
+linkColor = "#0A7D2C"
+borderColor = "#D5DBD3"
+showWidgetBorder = true
+baseRadius = "6px"
+font = "Archivo"
+headingFont = "Archivo"
+
+[[theme.fontFaces]]
+family = "Archivo"
+url = "app/static/Archivo.woff"
+weight = "100 900"
+
+[theme.sidebar]
+backgroundColor = "#F3F5F2"
+secondaryBackgroundColor = "#FFFFFF"
 
 [client]
 toolbarMode = "minimal"
 
 [server]
 maxUploadSize = 50
+enableStaticServing = true
+# iCloud folders do not always send file-change events; polling makes code edits show on reload.
+fileWatcherType = "poll"
+runOnSave = true

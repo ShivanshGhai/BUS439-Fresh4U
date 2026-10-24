@@ -14,6 +14,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+
+def _mask(cond) -> "np.ndarray":
+    """A plain True/False array for np.select (newer numpy refuses pandas' nullable booleans); missing = False."""
+    return pd.array(cond, dtype="boolean").fillna(False).to_numpy(dtype=bool)
+
+
 ROW_M2 = 144.5
 BANDS = ["Strong", "Typical", "Developing"]
 
@@ -43,7 +49,7 @@ def strengths(records: pd.DataFrame, min_weeks: int = 4, min_hours: float = 8.0,
     g["weeks_since_start"] = ((last_day - g["first_seen"]).dt.days // 7).astype(int)
     enough = (g["weeks"] >= min_weeks) & (g["hours"] >= min_hours)
     lo, hi = 100 - band_pct, 100 + band_pct
-    band = np.select([~enough, g["speed_index"] >= hi, g["speed_index"] <= lo], ["Not enough data", "Strong", "Developing"],
+    band = np.select([_mask(~enough), _mask(g["speed_index"] >= hi), _mask(g["speed_index"] <= lo)], ["Not enough data", "Strong", "Developing"],
                      default="Typical")
     ramping = (band == "Developing") & (g["weeks_since_start"] < ramp_weeks)
     g["band"] = np.where(ramping, "Ramping up", band)

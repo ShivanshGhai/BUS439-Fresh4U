@@ -34,9 +34,14 @@ def enrich_performance(h: pd.DataFrame) -> pd.DataFrame:
         if c not in df:
             df[c] = np.nan
         df[c] = pd.to_numeric(df[c], errors="coerce")
-    for c in ["location", "employee_group", "end_time", "start_time"]:
+    for c in ["location", "employee_group", "end_time", "start_time", "greenhouse"]:
         if c not in df:
             df[c] = pd.NA
+    # Some exports (e.g. R&D Analytics from October) give the house as a column group and no row.
+    gh = df["greenhouse"].astype("string").str.strip()
+    from_gh = df["location"].isna() & gh.str.match(r"^House \d+$").fillna(False)
+    df.loc[from_gh, "location"] = gh[from_gh]
+    df["location_from_greenhouse"] = from_gh.to_numpy(bool)
     df["date"] = pd.to_datetime(df["date"].astype(str).str.slice(0, 10), format="%Y-%m-%d")
     df["employee_id"] = df["employee_id"].astype(str).str.strip().str.replace(r"\.0$", "", regex=True)
     for c in ["activity", "location", "employee_group"]:
@@ -74,7 +79,7 @@ def enrich_performance(h: pd.DataFrame) -> pd.DataFrame:
     df["min_per_row"] = np.where(df["area_m2_clean"] > 0, 60 * df["hours"] / (df["area_m2_clean"] / ROW_M2), np.nan)
     df["week_start"] = df["date"] - pd.to_timedelta(df["date"].dt.weekday, unit="D")
     df["weekday"] = df["date"].dt.day_name()
-    df["productivity_eligible"] = ((df["location_type"] == "Row") & (df["hours"] >= 1 / 60) &
+    df["productivity_eligible"] = (((df["location_type"] == "Row") | df["location_from_greenhouse"]) & (df["hours"] >= 1 / 60) &
                                    (df["area_m2_clean"] > 0) & (df["activity_name"] != "Sweeping"))
 
     f = pd.DataFrame(index=df.index)

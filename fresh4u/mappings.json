@@ -1,8 +1,18 @@
 {
-  "_about": "How Priva report headers map to our column names. To support a new report or a renamed field, edit this file, not the code. Header text is matched case-insensitively with spaces trimmed.",
+  "_about": "How Priva report headers map to our column names. To support a new report or a renamed field, edit this file, not the code. Header text is matched case-insensitively with spaces trimmed. 'text' lists measures kept as words (not added up); clock times (e.g. 06:14) are read as hours. Any 'employee_name' column is replaced by the employee number before anything is stored.",
+
+  "_not_used": {
+    "_about": "Report titles the app recognises but does not use yet, with the reason shown to the user. Not an error.",
+    "Performance": "Per-person summary with names but no employee numbers or dates. The R&D Analytics export has the same work per registration, with employee numbers.",
+    "Performance (tactical)": "Totals for one filtered selection only (19,259 h for '2026'). Use Production for site-wide hours.",
+    "Climate (tactical)": "Climate is outside the labour plan for now.",
+    "Quality Evaluation": "Quality ratings (strawberries only, one evaluator). Kept for later; not used in the plan yet.",
+    "Reader scan log": "Scanner activity per reader. Not needed for the plan.",
+    "Weighing log": "Harvest weighings with no date, person or row. The yield report (Production tactical) is used instead."
+  },
 
   "performance": {
-    "description": "Priva Operational Report, Performance template (labour registrations per activity / location / employee)",
+    "description": "Priva Operational Report, Performance template (labour registrations per activity / location / employee). Also the R&D Analytics exports.",
     "dimensions": {
       "date": ["Date", "Day"],
       "activity": ["Activity"],
@@ -10,7 +20,8 @@
       "greenhouse": ["Greenhouse", "House"],
       "site": ["Site"],
       "employee_group": ["Employee group"],
-      "employee_id": ["Employee (short)", "Employee", "Employee number"],
+      "employee_id": ["Employee (short)", "Employee number"],
+      "employee_name": ["Employee"],
       "start_time": ["Start time"],
       "end_time": ["End time"],
       "hour": ["Hour"]
@@ -21,26 +32,60 @@
       "area_m2": ["Area"],
       "perf_per_hour_priva": ["Performance / hour", "Performance/hour"],
       "locations_count": ["Number of locations"],
-      "area_per_hour_priva": ["Area / hour", "Area/hour"]
+      "area_per_hour_priva": ["Area / hour", "Area/hour"],
+      "rows_done_priva": ["Number of rows"],
+      "min_per_row_priva": ["Minutes / row"],
+      "rows_per_hour_priva": ["Rows / hour"],
+      "pct_of_norm_priva": ["% Area / hour", "% Performance / hour"],
+      "perf_per_m2_priva": ["Performance / m²"]
     },
     "required": ["date", "activity", "employee_id", "hours"],
     "additive": ["hours", "result", "area_m2"]
   },
 
-  "hours": {
-    "description": "Priva Operational Report, Hours template (present / worked / paid hours per employee per day). Mapping is a first guess until we see a real export.",
+  "production": {
+    "description": "Priva Operational Report, Production template: hours, result and area per activity group / activity / location for a period. Covers every activity on site.",
     "dimensions": {
-      "date": ["Date", "Day"],
-      "employee_group": ["Employee group"],
-      "employee_id": ["Employee (short)", "Employee", "Employee number"]
+      "activity_group": ["Activity group"],
+      "activity": ["Activity"],
+      "location": ["Location", "Row", "Path"]
     },
     "measures": {
-      "present_hours": ["Present hours", "Hours present"],
-      "worked_hours": ["Worked hours", "Hours worked", "Registered hours"],
-      "paid_hours": ["Paid hours", "Hours to be paid"],
-      "break_hours": ["Break hours", "Breaks"]
+      "hours": ["Registered hours"],
+      "result": ["Result"],
+      "area_m2": ["Area"],
+      "perf_per_hour_priva": ["Performance / hour", "Performance/hour"],
+      "rows_done_priva": ["Number of rows"],
+      "perf_per_m2_priva": ["Performance / m²"]
     },
-    "required": ["date", "employee_id", "present_hours"],
-    "additive": ["present_hours", "worked_hours", "paid_hours", "break_hours"]
+    "required": ["activity_group", "activity", "hours"],
+    "additive": ["hours", "result", "area_m2"]
+  },
+
+  "hours": {
+    "description": "Priva Operational Report, Hours template: paid, present and registered hours per employee, by weekday, for a period.",
+    "dimensions": {
+      "employee_group": ["Employee group"],
+      "employee_name": ["Employee"],
+      "weekday": ["Day"]
+    },
+    "measures": {
+      "paid_hours": ["Paid hours", "Hours to be paid"],
+      "days_absent": ["# Absent"],
+      "days_present": ["# Present"],
+      "start_work": ["Start work"],
+      "end_work": ["End work"],
+      "employee_number": ["Employee number"],
+      "login": ["Login"],
+      "logout": ["Logout"],
+      "days": ["Number of days"],
+      "registered_hours": ["Registered hours"],
+      "present_hours": ["Present hours", "Hours present"],
+      "presence": ["Presence"]
+    },
+    "text": ["presence"],
+    "times": ["start_work", "end_work", "login", "logout"],
+    "required": ["employee_name", "paid_hours", "present_hours"],
+    "additive": ["paid_hours", "present_hours", "registered_hours", "days_absent", "days_present"]
   }
 }
