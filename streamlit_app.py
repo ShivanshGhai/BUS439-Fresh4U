@@ -145,10 +145,13 @@ tab_over, tab_plan, tab_targets, tab_check, tab_trust, tab_more = st.tabs(
 
 # ---- year plan (computed first: the overview quotes it) -------------------------------------------
 plan = None
+year = crew = None
 with tab_plan:
+    strip_slot = st.container()
     ui.section("How many people will we need each week of the year?",
-               "Harvest from the yield curve, crop work from the weekly pattern Priva recorded, plus packing, "
-               "clean-out, pest control and breaks. Every house, every activity.")
+               "Harvest from the yield curve, crop work from Priva's weekly pattern, plus packing, clean-out, "
+               "pest control and breaks.")
+    answer_slot = st.container()
     if not has_plan:
         ui.callout("The year plan needs a full year of weekly yield (Priva's Production (tactical) report) and at "
                    "least one whole-site week (a Production export or a Management Report).",
@@ -175,9 +178,16 @@ with tab_plan:
         plan = sp.build_plan(sp.weekly_kg(res["yield"], year, tom_pct, str_pct), R, res["cw_points"], settings)
         s = sp.summary(plan, crew)
         cats = plan[sp.CATEGORIES].sum()
+        with strip_slot:
+            ui.season_strip(plan, year, crew, mark=[s["peak_week"]],
+                            mark_label=f"Busiest week, {ins.n(s['peak_people'])} people")
+        with answer_slot:
+            ui.answer(f"Labour peaks at **{ins.n(s['peak_people'])} people** in {ins.week_label(s['peak_week'], year)}. "
+                      f"The crew of {ins.n(crew)} covers **{52 - s['weeks_over_crew']} of 52** weeks; the rest needs "
+                      "contractors.")
         ui.kpis([
             ui.kpi_html("Hours in the year", ins.n(s["total_hours"]), "registered, breaks included"),
-            ui.kpi_html("Busiest week", f"{ins.n(s['peak_people'])} people", ins.week_label(s["peak_week"], year), tone="bad"),
+            ui.kpi_html("Busiest week", f"{ins.n(s['peak_people'])} people", ins.week_label(s["peak_week"], year), tone="neutral"),
             ui.kpi_html("Quietest week", f"{ins.n(s['low_people'])} people", ins.week_label(s["low_week"], year)),
             ui.kpi_html("Weeks above the crew", f"{s['weeks_over_crew']} of 52", f"crew of {ins.n(crew)} people"),
             ui.kpi_html("Contractor person-weeks", ins.n(s["contractor_person_weeks"]), "above the TFW + local crew",
@@ -186,7 +196,7 @@ with tab_plan:
         ui.chart_title(f"{unit} needed each week, by activity",
                        f"Yield of {year} × {tom_pct}% (tomato) and {str_pct}% (strawberry). Hover a bar for the week.")
         ui.show(ui.plan_chart(plan, unit, crew, hpp, year), height=340)
-        ui.callout(ins.plan_takeaways(s, crew, year, cats), tag="What this means")
+        ui.callout(ins.plan_takeaways(s, crew, year, cats)[1:], tag="What this means")
 
         c1, c2 = st.columns(2)
         with c1:
@@ -229,14 +239,28 @@ with tab_plan:
 
 # ---- targets ------------------------------------------------------------------------------------
 with tab_targets:
+    t_strip = st.container()
     ui.section("Is each task on track?",
                "A target per task and season from Fresh4U's own history, for the grower to confirm and enter in Priva.")
     if T.empty:
+        with t_strip:
+            ui.season_strip(plan, year, crew)
         ui.callout("Targets need registrations with area (R&D Analytics) or a Production export.", tone="note",
                    tag="Not enough data yet")
     else:
-        ui.callout(ins.priva_norm_takeaway(res["priva_norm"], T), tag="Priva's norm today",
-                   tone="alert" if len(res["priva_norm"]) else "note")
+        if len(res["priva_norm"]):
+            nr = res["priva_norm"].iloc[-1]
+            ui.answer(f"Priva grades every task against one norm, **{ins.n(nr.as_min_per_row, 1)} min/row**. "
+                      f"Real paces run from {ins.n(T['target_min_per_row'].min(), 1)} to "
+                      f"{ins.n(T['target_min_per_row'].max(), 0)} min/row, so {ins.n(T['task'].nunique())} tasks "
+                      "get their own target below.", tone="warn")
+            ui.callout("Entered in Priva as a norm per activity, these targets make Priva's own % performance and "
+                       "phone app meaningful. The grower's numbers win: type them in the last column.",
+                       tag="What to do", tone="warn")
+        else:
+            ui.answer(f"**{ins.n(T['task'].nunique())} tasks** now have their own target per season, from "
+                      f"{ins.n(T['target_min_per_row'].min(), 1)} to {ins.n(T['target_min_per_row'].max(), 0)} min/row.")
+            ui.callout(ins.priva_norm_takeaway(res["priva_norm"], T), tag="Priva's norm today", tone="note")
         c1, c2 = st.columns(2)
         crops = sorted(T["crop"].unique())
         crop = c1.selectbox("Crop", ["All"] + crops)
@@ -261,7 +285,15 @@ with tab_targets:
                "evidence": "Evidence",
                "priva_norm_m2_per_hour": st.column_config.NumberColumn("As a Priva norm (m²/h)", format="%.0f"),
                "grower_min_per_row": st.column_config.NumberColumn("Grower's target (min/row)", format="%.1f")}
-        edited = ui.full_width(st.data_editor, view[cols], hide_index=True, column_config=cfg,
+        # Display copy: optional numbers show "—" when there is no value, never "None" (the CSV uses `view`).
+        disp = view[cols].copy()
+        for c, fmt in (("good_week", "{:.1f}"), ("slow_week", "{:.1f}"), ("kg_per_hour", "{:,.0f}"),
+                       ("priva_norm_m2_per_hour", "{:,.0f}")):
+            disp[c] = disp[c].map(lambda v, f=fmt: f.format(v) if pd.notna(v) else "—")
+        for c, label in (("good_week", "Good week"), ("slow_week", "Slow week"), ("kg_per_hour", "kg per hour"),
+                         ("priva_norm_m2_per_hour", "As a Priva norm (m²/h)")):
+            cfg[c] = label
+        edited = ui.full_width(st.data_editor, disp, hide_index=True, column_config=cfg,
                                disabled=cols[:-1], key="targets_editor")
         edited = view[cols] if edited is None else edited
         agreed = tg.for_priva(view, pd.Series(edited["grower_min_per_row"].to_numpy(), index=view.index))
@@ -279,6 +311,9 @@ with tab_targets:
         ui.section("Was a week on track?", "Each task's pace that week against its target for the season. "
                                            "The target leaves the week itself out.")
         weeks = sorted(pace["week_start"].unique()) if len(pace) else []
+        if not weeks:
+            with t_strip:
+                ui.season_strip(plan, year, crew)
         if weeks:
             comparable = [i for i, w in enumerate(weeks)
                           if (tg.week_on_track(pace, T, w)["status"] != "No target yet").any()]
@@ -286,6 +321,9 @@ with tab_targets:
                                            format_func=ins.day, key="ot_week",
                                            help="Opens on the latest week that has other weeks of its season to compare with."))
             ot = tg.week_on_track(pace, T, wk)
+            with t_strip:
+                ui.season_strip(plan, year, crew, mark=ui.iso_weeks_between(wk, wk + pd.Timedelta(days=6)),
+                                mark_label="Week checked")
             ui.callout(ins.on_track_takeaway(ot, wk))
             if len(ot[ot["status"] != "No target yet"]):
                 ui.show(ui.on_track_chart(ot, 100 * tg.ON_TRACK_BAND), height=max(140, 40 * len(ot)))
@@ -302,9 +340,12 @@ with tab_targets:
 
 # ---- weekly check ----------------------------------------------------------------------------------
 with tab_check:
+    c_strip = st.container()
     ui.section("Can this period's numbers be trusted?",
                "A list for supervisors to fix in Priva before payroll. People are shown by employee number only.")
     if not hours_periods:
+        with c_strip:
+            ui.season_strip(plan, year, crew)
         ui.callout("The weekly check needs Priva's Hours report (present, registered and paid hours per person) "
                    "for the period.", tone="note", tag="Not enough data yet")
     else:
@@ -313,15 +354,20 @@ with tab_check:
         slow = wc.slow_registrations(res["review"], per)
         locs = wc.location_problems(res["production"], per)
         sm = wc.summary(unt, slow, locs)
+        with c_strip:
+            ui.season_strip(plan, year, crew, mark=ui.iso_weeks_between(*per), mark_label="Pay period")
+        ui.answer(f"**{ins.n(sm['untagged'])} h** of present time had no task booked. "
+                  f"{ins.plural(sm['people_flagged'], 'person', 'people')} to check before Tuesday's payroll.",
+                  tone="warn" if sm["untagged"] else "")
         ui.kpis([
             ui.kpi_html("Present but untagged", f"{ins.n(sm['untagged'])} h",
-                        f"{ins.pct(100 * sm['untagged'] / sm['present'], 1)} of present time", tone="bad"),
+                        f"{ins.pct(100 * sm['untagged'] / sm['present'], 1)} of present time", tone="warn"),
             ui.kpi_html("People to check", ins.n(sm["people_flagged"]), f"of {ins.n(sm['people'])} present",
-                        tone="bad" if sm["people_flagged"] else "good"),
+                        tone="warn" if sm["people_flagged"] else "good"),
             ui.kpi_html("Registrations 3x+ usual", ins.n(sm["slow"]), f"{ins.n(sm['slow_hours'], 1)} h",
-                        tone="bad" if sm["slow"] else "good"),
+                        tone="warn" if sm["slow"] else "good"),
             ui.kpi_html("Locations that can't be right", ins.n(sm["loc_items"]), f"{ins.n(sm['loc_hours'])} h",
-                        tone="bad" if sm["loc_items"] else "good"),
+                        tone="warn" if sm["loc_items"] else "good"),
         ])
         ui.callout(ins.weekly_check_takeaway(sm, per))
         lst = wc.supervisor_list(unt, slow, locs)
@@ -365,12 +411,20 @@ with tab_check:
 
 # ---- overview -------------------------------------------------------------------------------------
 with tab_over:
-    ui.section("At a glance", "Plan the year, check the week against targets, and fix the numbers before payroll.")
+    latest = ui.iso_weeks_between(*hours_periods[0]) if hours_periods else []
+    ui.season_strip(plan, year, crew, mark=latest, mark_label="Latest pay period" if latest else "")
+    ui.section("The season at a glance")
+    if plan is not None:
+        s_over = sp.summary(plan, crew)
+        ui.answer(f"Next season peaks at **{ins.n(s_over['peak_people'])} people** in week {s_over['peak_week']}. "
+                  f"The crew of {ins.n(crew)} covers {52 - s_over['weeks_over_crew']} of 52 weeks, and every Priva "
+                  f"total checked adds up ({trust['checks'] - trust['checks_failed']} of {trust['checks']}).")
+    else:
+        ui.answer(f"**{trust['checks'] - trust['checks_failed']} of {trust['checks']}** Priva totals add up to their "
+                  "records.", tone="" if not trust["checks_failed"] else "bad")
     cards = []
     if plan is not None:
-        s0 = sp.summary(plan, crew)
-        cards.append(ui.kpi_html("Busiest week in the plan", f"{ins.n(s0['peak_people'])} people",
-                                 ins.week_label(s0["peak_week"], year), tone="neutral"))
+        s0 = s_over
         cards.append(ui.kpi_html("Weeks above the TFW crew", f"{s0['weeks_over_crew']} of 52",
                                  "contractors needed", tone="neutral"))
     if not T.empty:
@@ -379,23 +433,23 @@ with tab_over:
     if hours_periods:
         u0 = wc.untagged(res["hours"], hours_periods[0])
         cards.append(ui.kpi_html("Untagged time, latest period", f"{ins.n(u0['untagged'].sum())} h",
-                                 f"{ins.n(int(u0['flag'].sum()))} people to check", tone="bad"))
+                                 f"{ins.n(int(u0['flag'].sum()))} people to check", tone="warn"))
     cards.append(ui.kpi_html("Priva totals reconciled", f"{trust['checks'] - trust['checks_failed']} / {trust['checks']}",
                              "every total matches its records" if not trust["checks_failed"] else "some totals differ",
                              tone="good" if not trust["checks_failed"] else "bad"))
     cards.append(ui.kpi_html("Files held back", ins.n(trust["quarantined"]),
-                             "did not add up, so not used" if trust["quarantined"] else "every file passed",
-                             tone="bad" if trust["quarantined"] else "good"))
+                             "caught by the checks, so not used" if trust["quarantined"] else "every file passed",
+                             tone="warn" if trust["quarantined"] else "good"))
     ui.kpis(cards)
     take = [ins.trust_takeaway(trust)]
     if plan is not None:
-        take += ins.plan_takeaways(s0, crew, year, plan[sp.CATEGORIES].sum())[:2]
+        take += ins.plan_takeaways(s0, crew, year, plan[sp.CATEGORIES].sum())[1:3]
     if hours_periods:
         take.append(ins.weekly_check_takeaway(wc.summary(u0, wc.slow_registrations(res["review"], hours_periods[0]),
                                                          wc.location_problems(res["production"], hours_periods[0])),
                                               hours_periods[0])[0])
     ui.callout(take, tag="Key takeaways")
-    ui.section("How it works", "A loop: each week's fixes make next week's plan and targets better.")
+    ui.section("How it works", "A loop: each week's fixes make the next plan and targets better.")
     ui.steps([
         ("Plan the year", "Hours and people per week for every house and activity, from yield and Priva's rates.",
          "Year plan"),
@@ -407,18 +461,24 @@ with tab_over:
 
 # ---- data trust -------------------------------------------------------------------------------------------
 with tab_trust:
+    covered = ui.iso_weeks_between(rec["date"].min(), rec["date"].max()) if not rec.empty else []
+    ui.season_strip(plan, year, crew, mark=covered, mark_label="Registrations loaded" if covered else "")
     ui.section("Can we trust these numbers?",
                "Nothing is used until it adds up to Priva's own totals.")
+    ui.answer(f"**{trust['checks'] - trust['checks_failed']} of {trust['checks']}** Priva totals match the records "
+              f"underneath them. {ins.plural(trust['quarantined'], 'file')} held back.",
+              tone="bad" if trust["checks_failed"] else "")
     ui.kpis([
         ui.kpi_html("Files loaded", ins.n(trust["loaded"]), f"of {trust['files']} read", tone="good"),
-        ui.kpi_html("Files held back", ins.n(trust["quarantined"]), "changed nothing",
-                    tone="bad" if trust["quarantined"] else "good"),
-        ui.kpi_html("Recognised, not used", ins.n(len(not_used)), "reason listed below"),
+        ui.kpi_html("Files held back", ins.n(trust["quarantined"]),
+                    "caught by the checks; changed nothing" if trust["quarantined"] else "every file passed",
+                    tone="warn" if trust["quarantined"] else "good"),
+        ui.kpi_html("Recognised, not used", ins.n(len(not_used)),
+                    "reason listed below" if len(not_used) else "every file was used"),
         ui.kpi_html("Priva totals checked", ins.n(trust["checks"]), "subtotals and grand totals"),
         ui.kpi_html("Totals that failed", ins.n(trust["checks_failed"]), "in loaded files",
                     tone="bad" if trust["checks_failed"] else "good"),
     ])
-    ui.callout(ins.trust_takeaway(trust))
     ui.steps([
         ("Read by column name", "Each file is read by its headers, never by position, so moved or extra "
                                 "columns are handled.", ""),
@@ -459,12 +519,15 @@ with tab_trust:
 # ---- more: last night's single-task views -------------------------------------------------------------------
 with tab_more:
     if rec.empty:
+        ui.season_strip(plan, year, crew)
         ui.callout("These views need registrations (R&D Analytics exports).", tone="note", tag="Not enough data")
     else:
         colors = ui.task_colors(rec)
         tasks = sorted(pace["activity_name"].dropna().unique())
         focus = next(iter(colors))
         next_week = pace["week_start"].max() + pd.Timedelta(weeks=1)
+        ui.season_strip(plan, year, crew, mark=[int(pd.Timestamp(next_week).isocalendar()[1])],
+                        mark_label="Next week")
         m_plan, m_crew, m_review, m_trends = st.tabs(["One task, next week", "Crew strengths", "Review list", "Trends"])
         with m_plan:
             ui.section("How many people does a task need next week?",
@@ -532,7 +595,7 @@ with tab_more:
                                             key="review_week"))
             sel = rv[(pd.to_datetime(rv["date"]) >= wk2) & (pd.to_datetime(rv["date"]) < wk2 + pd.Timedelta(days=7))]
             hrs = rec.loc[rec["week_start"] == wk2, "hours"].sum()
-            ui.callout(ins.review_takeaway(sel, hrs, wk2), tone="alert" if len(sel) else "")
+            ui.callout(ins.review_takeaway(sel, hrs, wk2), tone="warn" if len(sel) else "")
             if len(sel):
                 table(sel, column_config={
                     "date": st.column_config.DateColumn("Date", format="MMM D"), "activity_name": "Task",

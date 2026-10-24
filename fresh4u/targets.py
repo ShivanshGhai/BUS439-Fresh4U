@@ -14,6 +14,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+
+def _mask(cond) -> "np.ndarray":
+    """A plain True/False array for np.select (newer numpy refuses pandas' nullable booleans); missing = False."""
+    return pd.array(cond, dtype="boolean").fillna(False).to_numpy(dtype=bool)
+
 ROW_M2 = 144.5
 SEASONS = {1: "Winter (Jan–Mar)", 2: "Winter (Jan–Mar)", 3: "Winter (Jan–Mar)",
            4: "Spring (Apr–Jun)", 5: "Spring (Apr–Jun)", 6: "Spring (Apr–Jun)",
@@ -138,8 +143,8 @@ def week_on_track(pace: pd.DataFrame, targets: pd.DataFrame, week_start) -> pd.D
     p["target_min_per_row"] = p["activity_name"].map(t)
     p["target_weeks"] = p["activity_name"].map(n).fillna(0).astype(int)
     p["vs_target_pct"] = 100 * (p["min_per_row"] / p["target_min_per_row"] - 1)
-    p["status"] = np.select([p["target_min_per_row"].isna(), p["vs_target_pct"] > 100 * ON_TRACK_BAND,
-                             p["vs_target_pct"] < -100 * ON_TRACK_BAND],
+    p["status"] = np.select([_mask(p["target_min_per_row"].isna()), _mask(p["vs_target_pct"] > 100 * ON_TRACK_BAND),
+                             _mask(p["vs_target_pct"] < -100 * ON_TRACK_BAND)],
                             ["No target yet", "Slower than target", "Faster than target"], default="On track")
     p["hours_at_target"] = p["rows_done"] * p["target_min_per_row"] / 60
     p["hours_over"] = p["hours"] - p["hours_at_target"]

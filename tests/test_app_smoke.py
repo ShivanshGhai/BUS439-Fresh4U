@@ -105,6 +105,10 @@ class FakeSt:
         return _Ctx()
 
     @staticmethod
+    def container(*a, **k):
+        return _Ctx()
+
+    @staticmethod
     def stop():
         raise StopApp()
 

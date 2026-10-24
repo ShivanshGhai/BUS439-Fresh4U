@@ -18,6 +18,12 @@ import re
 import numpy as np
 import pandas as pd
 
+
+def _mask(cond) -> "np.ndarray":
+    """A plain True/False array for np.select (newer numpy refuses pandas' nullable booleans); missing = False."""
+    return pd.array(cond, dtype="boolean").fillna(False).to_numpy(dtype=bool)
+
+
 UNTAGGED_MIN_HOURS = 2.0       # flag someone when untagged time over the period is at least this...
 UNTAGGED_MIN_SHARE = 0.05      # ...and at least this share of their present hours
 ALWAYS_UNLOCATED = re.compile(r"^(Break|Packing|Scales|Forklift|Bug breeding|Mixing fertilizer|Transport|Unknown|Hand Watering|Misc planting|Filling pots)", re.I)
@@ -63,7 +69,7 @@ def location_problems(prod: pd.DataFrame, period: tuple[str, str]) -> pd.DataFra
     crop_house = house.map({"House 1": "Tomato", "House 2": "Tomato", "House 3": "Strawberry", "House 4": "Strawberry"})
     wrong = (crop_act != "") & crop_house.notna() & (crop_house.to_numpy(dtype=object) != crop_act)
     nowhere = (loc == "Unknown") & ~p["activity"].str.match(ALWAYS_UNLOCATED) & (p["hours"] > 0.5)
-    p["problem"] = np.select([wrong, nowhere], ["Task for the other crop's house", "Hours with no row for a row task"], "")
+    p["problem"] = np.select([_mask(wrong), _mask(nowhere)], ["Task for the other crop's house", "Hours with no row for a row task"], "")
     p["house"] = house
     out = (p[p["problem"] != ""].groupby(["activity", "house", "problem"], dropna=False)
            .agg(hours=("hours", "sum"), locations=("location", "nunique")).reset_index()
