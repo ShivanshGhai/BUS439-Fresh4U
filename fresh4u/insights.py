@@ -265,3 +265,91 @@ def overview_takeaways(res: dict, focus_task: str, lookback: int = 4) -> list[st
         out.append(f"**{n(len(rv))} registrations** ({pct(share, 1)} of all hours) look like missed tag-outs and "
                    "should be corrected in Priva so they do not distort the pace the planner uses.")
     return out
+
+
+# ---- year plan ---------------------------------------------------------------------------------
+
+def week_label(iso_week: int, year: int) -> str:
+    """'week 24 (Jun 9)' using the Monday of that ISO week."""
+    import datetime as _d
+    return f"week {iso_week} ({_d.date.fromisocalendar(int(year), int(iso_week), 1):%b %d})"
+
+
+def plan_takeaways(s: dict, crew: float, year: int, cats: pd.Series) -> list[str]:
+    out = [f"Labour peaks at **{n(s['peak_people'])} people** in {week_label(s['peak_week'], year)} and drops to "
+           f"**{n(s['low_people'])}** in {week_label(s['low_week'], year)}. "
+           f"Over the year that is **{n(s['total_hours'])} hours**."]
+    if s["weeks_over_100"]:
+        out.append(f"**{plural(s['weeks_over_100'], 'week')}** need more than 100 people, between "
+                   f"{week_label(s['first_over_100'], year)} and {week_label(s['last_over_100'], year)}: "
+                   "the window to have contractors booked.")
+    out.append(f"The TFW and local crew ({n(crew)} people) covers the work in only "
+               f"**{plural(52 - s['weeks_over_crew'], 'week')}** of 52. Above it the plan needs "
+               f"**{n(s['contractor_person_weeks'])} contractor person-weeks**.")
+    top = cats.sort_values(ascending=False)
+    out.append(f"The biggest blocks of work are **{top.index[0].lower()}** ({pct(100 * top.iloc[0] / top.sum())}) and "
+               f"**{top.index[1].lower()}** ({pct(100 * top.iloc[1] / top.sum())}) of hours. "
+               "The old planner covered tomato crop work only.")
+    return out
+
+
+def check_takeaway(chk: pd.DataFrame) -> str:
+    tot = chk[chk["category"] == "Total hours"]
+    parts = [f"{r.week}: recorded **{n(r.recorded)} h**, plan **{n(r.plan)} h** "
+             f"({pct(100 * (r.plan - r.recorded) / r.recorded, 0) if r.recorded else '–'})" for r in tot.itertuples()]
+    return ("; ".join(parts) + ". The plan's rates come from these same weeks, so this shows the pieces add up, "
+            "not that the forecast is right. A full year of weekly hours by activity would test it.")
+
+
+# ---- targets -------------------------------------------------------------------------------------
+
+def priva_norm_takeaway(norm: pd.DataFrame, targets: pd.DataFrame) -> str:
+    if norm is None or norm.empty:
+        return ("Priva's '% performance' needs a norm per activity. None of the loaded exports show one, "
+                "so the targets below are the starting point.")
+    r = norm.iloc[-1]
+    lo = targets["target_min_per_row"].min() if len(targets) else float("nan")
+    hi = targets["target_min_per_row"].max() if len(targets) else float("nan")
+    return (f"Priva currently divides **every** task by the same norm, **{n(r.norm_m2_per_hour, 2)} m² per hour** "
+            f"(**{n(r.as_min_per_row, 1)} minutes per row**). Real paces run from **{n(lo, 1)}** to **{n(hi, 0)} minutes "
+            "per row**, so Priva's % performance cannot say whether a crew is on track. Entering the targets below as "
+            "a norm per activity would make Priva's own percentages and phone app meaningful.")
+
+
+def on_track_takeaway(ot: pd.DataFrame, wk) -> str:
+    if ot.empty:
+        return f"No task had enough rows in the week of {short_day(wk)} to compare."
+    known = ot[ot["status"] != "No target yet"]
+    if known.empty:
+        return (f"The week of {short_day(wk)} is the only week of its season so far, so there is nothing to compare it "
+                "with yet.")
+    slow = known[known["status"] == "Slower than target"]
+    s = f"In the week of **{short_day(wk)}**, **{len(known) - len(slow)} of {len(known)} tasks** were on track or faster."
+    if len(slow):
+        worst = slow.iloc[0]
+        s += (f" **{worst.task}** ran **{pct(worst.vs_target_pct)} slower** than its target "
+              f"({n(worst.actual_min_per_row, 1)} vs {n(worst.target_min_per_row, 1)} min per row), about "
+              f"**{n(slow['hours_over'].sum())} hours** over across the slow tasks.")
+    return s
+
+
+# ---- weekly check --------------------------------------------------------------------------------
+
+def weekly_check_takeaway(sm: dict, period: tuple) -> list[str]:
+    a, b = period
+    out = [f"From **{short_day(a)} to {short_day(b)}**, {plural(sm['people'], 'person', 'people')} were present for "
+           f"**{n(sm['present'])} hours** and registered **{n(sm['registered'])}**. That leaves "
+           f"**{n(sm['untagged'])} hours** ({pct(100 * sm['untagged'] / sm['present'], 1) if sm['present'] else '–'}) "
+           "with no task."]
+    if sm["people_flagged"]:
+        out.append(f"**{plural(sm['people_flagged'], 'person', 'people')}** account for **{n(sm['untagged_flagged'])} h** of it "
+                   "(2 h or more, and at least 5% of their time). They are the first to check.")
+    if sm["slow"]:
+        out.append(f"**{plural(sm['slow'], 'registration')}** ({n(sm['slow_hours'], 1)} h) took 3x or more the usual time "
+                   "per row, which usually means a missed tag-out at a break or task change.")
+    if sm["loc_items"]:
+        out.append(f"**{plural(sm['loc_items'], 'task-and-place')}** ({n(sm['loc_hours'])} h) cannot be right: a task for the "
+                   "other crop's house, or a row task with no row.")
+    out.append("Fix these in Priva's **Validation & Correction** before payroll on Tuesday, re-export and run again. "
+               "Pay is then right, and the plan and targets learn from cleaner data.")
+    return out

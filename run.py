@@ -22,7 +22,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fresh4u.priva_reader import ReportError, file_sha256, flatten_any, load_mappings, read_report  # noqa: E402
+from fresh4u.priva_reader import (ReportError, file_sha256, flatten_any, load_mappings, not_used_reports,  # noqa: E402
+                                  read_report, report_title)
+from fresh4u.special import read_special  # noqa: E402
 from fresh4u.store import Store  # noqa: E402
 from fresh4u.enrich import enrich_performance, write_outputs  # noqa: E402
 
@@ -35,29 +37,41 @@ def main(argv=None) -> int:
     ap.add_argument("--budget", type=float, default=None, help="stop reading new files after N seconds")
     ap.add_argument("--accept-unverified", action="store_true",
                     help="load files that have no Priva totals to check against (default: quarantine them)")
+    ap.add_argument("--recursive", action="store_true", help="also read exports in sub-folders of the inbox")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
 
     say = (lambda *x: None) if a.quiet else print
     store = Store(a.data)
     mappings = load_mappings()
+    skip_titles = not_used_reports()
     t0 = time.time()
-    files = sorted(f for f in glob.glob(os.path.join(a.inbox, "*.xlsx")) if not os.path.basename(f).startswith("~$"))
+    pattern = os.path.join(a.inbox, "**", "*.xlsx") if a.recursive else os.path.join(a.inbox, "*.xlsx")
+    skip_dirs = {"demo_data", ".git", "data", "outputs", "quarantine"}   # never mix synthetic or working files in
+    files = sorted(f for f in glob.glob(pattern, recursive=a.recursive)
+                   if not os.path.basename(f).startswith("~$")
+                   and not (a.recursive and skip_dirs & set(os.path.relpath(f, a.inbox).split(os.sep)[:-1])))
     if not files:
         say(f"No .xlsx files in {a.inbox}")
-    loaded = quarantined = skipped = 0
+    loaded = quarantined = skipped = not_used = 0
     for path in files:
         name = os.path.basename(path)
         sha = file_sha256(path)
         prev = store.already_loaded(sha)
-        if prev:
+        if prev or store.already_seen(sha):
             skipped += 1
             continue
         if a.budget is not None and time.time() - t0 > a.budget:
             say("PARTIAL: time budget reached - run again to continue.")
             return 3
+        title = report_title(path)
+        if title in skip_titles:
+            store.record_not_used(name, sha, title, skip_titles[title])
+            not_used += 1
+            say(f"NOT USED     {name}: {skip_titles[title]}")
+            continue
         try:
-            rep = read_report(path, mappings)
+            rep = read_special(path) or read_report(path, mappings)
         except ReportError as e:
             if not store.already_quarantined(sha):
                 store.quarantine(name, sha, str(e), preview=flatten_any(path))
@@ -70,7 +84,7 @@ def main(argv=None) -> int:
         elif len(rep.reconciliation) and not rep.reconciles:
             n = int((~rep.reconciliation["match"]).sum())
             reason = f"{n} of {len(rep.reconciliation)} totals in the file do not match the sum of its records."
-        elif rep.period_start and rep.period_end and len(rep.records):
+        elif rep.period_start and rep.period_end and len(rep.records) and "date" in rep.records:
             d = rep.records["date"].astype(str)
             outside = ((d < rep.period_start) | (d > rep.period_end)).sum()
             if outside:
@@ -92,15 +106,16 @@ def main(argv=None) -> int:
         if rep.unmapped:
             say(f"             new fields kept as-is (add to mappings.json to name them): {', '.join(rep.unmapped)}")
 
-    say(f"\n{loaded} loaded, {quarantined} quarantined, {skipped} already loaded.")
+    say(f"\n{loaded} loaded, {quarantined} quarantined, {not_used} not used, {skipped} already seen.")
     hist = store.history("performance")
     if not hist.empty:
         summary = write_outputs(enrich_performance(hist), a.out)
         say(f"Outputs rebuilt in {a.out}: {summary['records']:,} records, {summary['hours']:,.1f} hours, "
             f"{summary['first_date']} to {summary['last_date']}, {summary['review_records']:,} records to review.")
-    for t in [t for t in mappings if t != "performance"]:
+    for t in [t for t in list(mappings) + ["yield", "mgmt_report"] if t != "performance"]:
         h = store.history(t)
         if not h.empty:
+            os.makedirs(a.out, exist_ok=True)
             h.to_csv(os.path.join(a.out, f"{t}_records.csv"), index=False)
             say(f"{t}: {len(h):,} records in {a.out}/{t}_records.csv")
     return 0

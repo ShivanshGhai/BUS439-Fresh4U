@@ -176,16 +176,16 @@ def md(text: str) -> str:
 
 
 # ---- components -------------------------------------------------------------------------------
-def hero(demo: bool):
-    data_pill = ('<span class="f4-pill warn">Synthetic demo data</span>' if demo
-                 else '<span class="f4-pill warn">Your uploaded exports</span>')
+def hero(demo: bool, source: str = ""):
+    label = "Synthetic demo data" if demo else ("Exports on this computer" if "computer" in source else "Your uploaded exports")
+    data_pill = f'<span class="f4-pill warn">{html.escape(label)}</span>'
     _html(f"""
 <div class="f4-hero">
   <div>
     <div class="eyebrow">The Fresh4U Group &middot; Labour planning</div>
     <div class="title f4-serif">Labour Planner</div>
-    <p>Turns Priva Performance exports into a verified weekly labour plan, a view of crew strengths
-    and a short list of registrations to fix.</p>
+    <p>Plans the whole year's labour from Fresh4U's own Priva data, checks each week against per-task
+    targets, and lists what to fix before payroll.</p>
   </div>
   <div class="f4-pills"><span class="f4-pill team">Built by {TEAM}</span>{data_pill}</div>
 </div>""")
@@ -249,7 +249,7 @@ def sidebar_summary(rows: list[tuple[str, str]]):
 
 def footer(demo: bool):
     data = "Synthetic demo data: no Fresh4U records are included." if demo else \
-        "Uploaded files are processed for this session only and are not saved."
+        "Client data stays on this computer; names are never stored."
     _html(f'<div class="f4-footer"><span>Built by <b>{TEAM}</b> for The Fresh4U Group &middot; '
           f'BUS 439, Simon Fraser University, Fall 2026</span><span>{html.escape(data)}</span></div>')
 
@@ -409,3 +409,90 @@ def review_by_task_chart(sel: pd.DataFrame):
         x=alt.X("count:Q", title="Registrations to check", axis=alt.Axis(tickMinStep=1)),
         tooltip=[alt.Tooltip("activity_name:N", title="Task"), alt.Tooltip("count:Q", title="Registrations"),
                  alt.Tooltip("hours:Q", title="Hours")])
+
+
+# ---- year plan, targets and weekly check ------------------------------------------------------------
+CAT_COLORS = {
+    "Tomato harvest": "#1E8A3C", "Tomato crop work": "#2F67B1", "Packing & grading": "#C98500",
+    "Strawberry harvest": "#8E5AA8", "Strawberry crop work": "#2A9D8F", "Clean-out & planting": "#8A6A45",
+    "Pest control & general": "#9AA0A6", "Breaks (unpaid)": "#CDD1D6",
+}
+STATUS_COLORS = {"Slower than target": TOMATO, "On track": GREEN_DARK, "Faster than target": "#2F67B1",
+                 "No target yet": "#C5C9CF"}
+
+
+def plan_chart(plan: pd.DataFrame, unit: str, crew_people: float, hours_per_person: float, year: int):
+    import datetime as _d
+    cats = list(CAT_COLORS)
+    k = 1 / hours_per_person if unit == "People" else 1.0
+    long = plan.melt(id_vars=["iso_week"], value_vars=cats, var_name="activity", value_name="v")
+    long["v"] = (long["v"] * k).round(1 if unit == "People" else 0)
+    long["rank"] = long["activity"].map({c: i for i, c in enumerate(cats)})
+    long["week_of"] = long["iso_week"].map(lambda w: f"{_d.date.fromisocalendar(int(year), int(w), 1):%b %d}")
+    tot = plan.assign(total=(plan["Total hours"] * k).round(1 if unit == "People" else 0))
+    tot["week_of"] = tot["iso_week"].map(lambda w: f"{_d.date.fromisocalendar(int(year), int(w), 1):%b %d}")
+    x = alt.X("iso_week:O", title="Week of the year", axis=alt.Axis(labelAngle=0, values=list(range(1, 53, 4))))
+    bars = alt.Chart(long).mark_bar(stroke="#fff", strokeWidth=0.4).encode(
+        x=x, y=alt.Y("sum(v):Q", title=unit, stack="zero"),
+        color=alt.Color("activity:N", scale=alt.Scale(domain=cats, range=[CAT_COLORS[c] for c in cats])),
+        order=alt.Order("rank:Q", sort="ascending"),
+        tooltip=[alt.Tooltip("iso_week:O", title="Week"), alt.Tooltip("week_of:N", title="Starts"),
+                 alt.Tooltip("activity:N", title="Activity"),
+                 alt.Tooltip("sum(v):Q", title=unit, format=",.1f" if unit == "People" else ",.0f")])
+    hit = alt.Chart(tot).mark_bar(opacity=0).encode(
+        x=x, y=alt.Y("total:Q"),
+        tooltip=[alt.Tooltip("iso_week:O", title="Week"), alt.Tooltip("week_of:N", title="Starts"),
+                 alt.Tooltip("total:Q", title=f"Total {unit.lower()}", format=",.0f"),
+                 alt.Tooltip("Changeover:N", title="Changeover")])
+    crew_v = crew_people if unit == "People" else crew_people * hours_per_person
+    rule_d = alt.Chart(pd.DataFrame({"y": [crew_v], "lab": [f"TFW + local crew ({crew_people:,.0f} people)"]}))
+    rule = rule_d.mark_rule(color=SLATE, strokeDash=[5, 4], strokeWidth=1.5).encode(y="y:Q")
+    lab = rule_d.mark_text(align="left", dx=4, dy=-7, color=SLATE, fontSize=11, fontWeight=600).encode(
+        y="y:Q", x=alt.value(4), text="lab:N")
+    return bars + hit + rule + lab
+
+
+def split_chart(cats: pd.Series):
+    d = cats.rename("hours").reset_index().rename(columns={"index": "activity"})
+    d.columns = ["activity", "hours"]
+    d["share"] = d["hours"] / d["hours"].sum()
+    d["label"] = d["share"].map(lambda s: f"{100 * s:.0f}%")
+    order = d.sort_values("hours", ascending=False)["activity"].tolist()
+    base = alt.Chart(d).encode(y=alt.Y("activity:N", title=None, sort=order))
+    bars = base.mark_bar(cornerRadiusEnd=4, size=18).encode(
+        x=alt.X("hours:Q", title="Hours in the year"),
+        color=alt.Color("activity:N", scale=alt.Scale(domain=list(CAT_COLORS), range=list(CAT_COLORS.values())), legend=None),
+        tooltip=[alt.Tooltip("activity:N", title="Activity"), alt.Tooltip("hours:Q", title="Hours", format=",.0f"),
+                 alt.Tooltip("share:Q", title="Share", format=".1%")])
+    text = base.mark_text(align="left", dx=4, color=MUTED, fontSize=11).encode(x="hours:Q", text="label:N")
+    return bars + text
+
+
+def on_track_chart(ot: pd.DataFrame, band_pct: float = 10.0):
+    d = ot[ot["status"] != "No target yet"].copy()
+    d["vs"] = d["vs_target_pct"].astype(float).round(1)
+    zone = alt.Chart(pd.DataFrame({"lo": [-band_pct], "hi": [band_pct]})).mark_rect(color=GREEN_TINT).encode(
+        x="lo:Q", x2="hi:Q")
+    zero = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color=SLATE).encode(x="x:Q")
+    bars = alt.Chart(d).mark_bar(cornerRadiusEnd=4, size=18).encode(
+        y=alt.Y("task:N", title=None, sort="-x"),
+        x=alt.X("vs:Q", title="Minutes per row vs target (%; right = slower)"),
+        color=alt.Color("status:N", scale=alt.Scale(domain=list(STATUS_COLORS), range=list(STATUS_COLORS.values())),
+                        legend=alt.Legend(orient="top", title=None)),
+        tooltip=[alt.Tooltip("task:N", title="Task"),
+                 alt.Tooltip("actual_min_per_row:Q", title="This week (min/row)", format=".1f"),
+                 alt.Tooltip("target_min_per_row:Q", title="Target (min/row)", format=".1f"),
+                 alt.Tooltip("vs:Q", title="vs target (%)"), alt.Tooltip("hours_over:Q", title="Hours over", format=",.0f")])
+    return zone + zero + bars
+
+
+def untagged_chart(u: pd.DataFrame, flag_hours: float):
+    d = u.copy()
+    d["untagged"] = d["untagged"].astype(float).round(1)
+    d["state"] = d["flag"].map({True: "To check", False: "Within normal range"})
+    return alt.Chart(d).mark_bar(cornerRadiusEnd=2).encode(
+        x=alt.X("untagged:Q", bin=alt.Bin(step=1), title="Hours present with no task, over the period"),
+        y=alt.Y("count():Q", title="People"),
+        color=alt.Color("state:N", scale=alt.Scale(domain=["Within normal range", "To check"], range=["#B8BEC6", TOMATO]),
+                        legend=alt.Legend(orient="top", title=None)),
+        tooltip=[alt.Tooltip("count():Q", title="People"), alt.Tooltip("state:N", title="")])
